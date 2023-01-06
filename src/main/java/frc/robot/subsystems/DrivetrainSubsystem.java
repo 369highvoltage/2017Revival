@@ -1,109 +1,103 @@
-// Copyright (c) FIRST and other WPILib contributors.
-// Open Source Software; you can modify and/or share it under the terms of
-// the WPILib BSD license file in the root directory of this project.
-
-package frc.robot.subsystems;
-
-import com.ctre.phoenix.motorcontrol.can.TalonSRX;
-import com.ctre.phoenix.motorcontrol.can.WPI_TalonSRX;
-
+import java.util.Map;
 import edu.wpi.first.wpilibj.DoubleSolenoid;
 import edu.wpi.first.wpilibj.DoubleSolenoid.Value;
 import edu.wpi.first.wpilibj.drive.DifferentialDrive;
 import edu.wpi.first.wpilibj.motorcontrol.MotorControllerGroup;
-import edu.wpi.first.wpilibj2.command.CommandBase;
+import edu.wpi.first.wpilibj.PneumaticsModuleType;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
-import frc.robot.RobotContainer;
+import frc.robot.Constants;
+import com.ctre.phoenix.motorcontrol.can.WPI_TalonSRX;
+import com.ctre.phoenix.motorcontrol.NeutralMode;
+import com.ctre.phoenix.sensors.WPI_PigeonIMU;
 
 public class DrivetrainSubsystem extends SubsystemBase {
-  /** Creates a new ExampleSubsystem. */
-  
-  //1 and 4 are left, 2 and 3 are right
+    private Map<String, WPI_TalonSRX> motorControllers;
+    private MotorControllerGroup leftSideMotors, rightSideMotors;
+    private DifferentialDrive drivetrain;
+    private DoubleSolenoid gearShifter;
+    private WPI_PigeonIMU pigeonIMU;
+    private WPI_TalonFX encoder;
+    SlewRateLimiter filter;
 
-  //Create new TalonSRX (the motorcontrollers used) objects, 
-  //and give them a name (i.e. Left 1, Right 1, Left 2, Right 2, etc.);
-  public WPI_TalonSRX m_L1,m_L2,m_R1,m_R2;
+    double encoderConversionFactor;
+    boolean isHighGearSet;
 
-  //this is how we connect the motor
-  //controllers that are on the same 
-  //side. 
-  MotorControllerGroup m_left, m_right;
+    public DrivetrainSubsystem(Constants constants) {
+        motorControllers.put("frontLeftMotor", new WPI_TalonFX(constants.getInt("frontLeftMotorPort")));
+        motorControllers.put("frontRightMotor", new WPI_TalonFX(constants.getInt("frontRightMotorPort")));
+        motorControllers.put("rearLeftMotor", new WPI_TalonFX(constants.getInt("rearLeftMotorPort")));
+        motorControllers.put("rearRightMotor", new WPI_TalonFX(constants.getInt("rearRightMotorPort")));
+        
+        for (WPI_TalonFX motorController : motorControllers.values())
+            motorController.setNeutralMode(NeutralMode.Brake);
 
-  //After determining which side is which,
-  //you need to combine them to finish
-  //setting up the drive.
-  DifferentialDrive m_drive;
+        leftSideMotors = new MotorControllerGroup(
+            motorControllers.get("frontLeftMotor"),
+            motorControllers.get("rearLeftMotor")
+        );
+        rightSideMotors = new MotorControllerGroup(
+            motorControllers.get("frontRightMotor"),
+            motorControllers.get("rearRightMotor")
+        );
 
-  //There is also one double solenoid that
-  //controls the gearbox (high, low)
-  DoubleSolenoid m_gearbox;
+        leftSideMotors.setInverted(true);
+        drivetrain = new DifferentialDrive(leftSideMotors, rightSideMotors);
 
-  public DrivetrainSubsystem() {
-    //Point the code to what port the TalonSRX is
-    //attached to. In this case, the SRXs are using
-    //PWM so we need to attach it based on the port it
-    //is connected to.
+        encoder = motorControllers.get(constants.getString("motorControllerAttachedToEncoder"))
+        encoder.configSelectedFeedbackSensor(FeedbackDevice.CTRE_MagEncoder_Relative, 0, 10);
+        encoderConversionFactor = constants.getDouble("encoderDistanceConversionValue");
+        this.resetDistanceSensor();
 
-    //left side
-    m_L1 = new WPI_TalonSRX(3);
-    m_L2 = new WPI_TalonSRX(0); //REPLACE THIS VALUE
+        gearShifter = new DoubleSolenoid(
+            PneumaticsModuleType.CTREPCM, 
+            constants.getInt("gearShifterPort1"), 
+            constants.getInt("gearShifterPort2")
+        );
+        isHighGearSet = constants.getBoolean("shifterDefaultHighGear");
+        this.setGear(isHighGearSet);
 
-    //group controllers together
-    m_left = new MotorControllerGroup(m_L1,m_L2);
-    //Always make sure to set one side to be inverted!!
-    m_left.setInverted(true);
-
-    //right side
-    m_R1 = new WPI_TalonSRX(1);
-    m_R2 = new WPI_TalonSRX(0); //REPLACE THIS VALUE
-
-    //group controllers togther
-    m_right = new MotorControllerGroup(m_R1, m_R2);
-
-    //And after you've assigned the left and right sides,
-    //then and only then, can you make a diff. drive for 
-    //the motor controllers
-    m_drive = new DifferentialDrive(m_left, m_right);
-
-    //You also need to be able to drive the gearbox.
-    //For that, intialize the double solenoid based
-    //on the ports it's plugged into on the PCM.
-    m_gearbox = RobotContainer.m_pcm.pcm.makeDoubleSolenoid(0, 1);
-  }
-
-  /**
-   * This allows the player (or code) to drive the robot 
-   * each side independently in a tank like fashion.
-   * leftInput controls left side, and rightInput controls right side.
-   */
-  public void tankDrive(double leftInput, double rightInput) {
-    m_drive.tankDrive(leftInput, rightInput);
-  }
-
-  /**
-   * this allows the player (or code) to drive the robot
-   * in a similar vein to controlling an RC car
-   * With driveInput controlling forward and backward
-   * and with steeringInput  turning left and right.
-   */
-  public void arcadeDrive(double driveInput, double steeringInput){
-    m_drive.arcadeDrive(driveInput, steeringInput);
-  }
-
-  //Initializes the gearbox and sets it based
-  //on value that is set.
-  //0 is neutral, 1 is low, 2 is high. (NEEDS TESTING)
-  public void setGearbox(int gear) {
-    switch(gear){
-      case 0: 
-        m_gearbox.set(Value.kOff);
-      case 1:
-        m_gearbox.set(Value.kForward);
-      case 2:
-        m_gearbox.set(Value.kReverse);
+        pigeonIMU = new WPI_PigeonIMU(constants.getInt("pigeonPort"));
+        filter = new SlewRateLimiter(constants.getDouble("limiter"));
     }
-  }
 
+    public void arcadeDrive(double linearVelocity, double angularVelocity) {
+        drivetrain.arcadeDrive(filter.calculate(linearVelocity), angularVelocity);
+    }
 
+    public double getAngle() {
+        return pigeon.getAngle();
+    }
+    
+    public double getAngularAcceleration(){
+        return pigeon.getRate();
+    }
 
+    public double getDistance() {
+        return encoder.getSelectedSensorPosition() * encoderConversionFactor;
+    }
+
+    public void resetAngle() {
+        pigeonIMU.setYaw(0);
+        pigeonIMU.reset();
+    }
+
+    public void resetDistance() {
+        encoder.setSelectedSensorPosition(0.0);
+    }
+    
+    private void setGear(boolean highGear) {
+        if(highGear)
+            gearShifter.set(Value.kForward);
+        else
+            gearShifter.set(Value.kReverse);
+    }
+
+    public void shiftGear() {
+        this.isHighGearSet = !this.isHighGearSet;
+        this.setGear(this.isHighGearSet);
+    }
+
+    public void tankDrive(double leftSideVelocity, double rightSideVelocity) {
+        drivetrain.tankDrive(filter.calculate(leftSideVelocity), filter.calculate(rightSideVelocity));
+    }
 }
