@@ -1,58 +1,67 @@
-// Copyright (c) FIRST and other WPILib contributors.
-// Open Source Software; you can modify and/or share it under the terms of
-// the WPILib BSD license file in the root directory of this project.
-
 package frc.robot;
 
-import frc.robot.Constants.DriverConstants;
-import frc.robot.commands.Autos;
-import frc.robot.commands.ExampleCommand;
-import frc.robot.subsystems.DrivetrainSubsystem;
-import frc.robot.subsystems.ExampleSubsystem;
-import frc.robot.subsystems.PnuematicSubsystem;
+import edu.wpi.first.wpilibj.PneumaticsControlModule;
+import edu.wpi.first.wpilibj.PS4Controller;
 import edu.wpi.first.wpilibj2.command.Command;
+import edu.wpi.first.wpilibj2.command.ParallelCommandGroup;
+import edu.wpi.first.wpilibj2.command.SequentialCommandGroup;
 import edu.wpi.first.wpilibj2.command.button.CommandPS4Controller;
-import edu.wpi.first.wpilibj2.command.button.CommandXboxController;
 import edu.wpi.first.wpilibj2.command.button.Trigger;
 
-/**
- * This class is where the bulk of the robot should be declared. Since Command-based is a
- * "declarative" paradigm, very little robot logic should actually be handled in the {@link Robot}
- * periodic methods (other than the scheduler calls). Instead, the structure of the robot (including
- * subsystems, commands, and trigger mappings) should be declared here.
- */
+import frc.robot.Constants;
+import frc.robot.subsystems.DrivetrainSubsystem;
+import frc.robot.commands.TeleopDriveCommand;
+
 public class RobotContainer {
-  // Replace with CommandPS4Controller or CommandJoystick if needed
-  private final CommandPS4Controller m_driverController =
-      new CommandPS4Controller(DriverConstants.kDriverControllerPort);
+    // Declare objects here
+    private final Constants constants;
+    
+    private final CommandPS4Controller driverController;
+    private final CommandPS4Controller operatorController;
+    
+    private final PneumaticsControlModule pneumatics;
 
-  //Setup the subsystems here
-  public static PnuematicSubsystem m_pcm = new PnuematicSubsystem();
-  public static DrivetrainSubsystem m_dt = new DrivetrainSubsystem();
+    public static SendableChooser<> autonomousChooser;
 
-  /** The container for the robot. Contains subsystems, OI devices, and commands. */
-  public RobotContainer() {
-    // Configure the trigger bindings
-    configureBindings();
-  }
+    DriveSubsystem driveSubsystem;
 
-  private void configureBindings() {
-    // Schedule `exampleMethodCommand` when the Xbox controller's B button is pressed,
-    // cancelling on release.
-    //m_driverController.b().whileTrue(m_exampleSubsystem.exampleMethodCommand());
-    //^This is how commands should be executed for shooting and whatnot
+    public RobotContainer() {
+        this.constants = new Constants();
 
-    if(m_driverController.cross().getAsBoolean()){
-    //If X is pressed, then set gear to high      
-    m_dt.setGearbox(2);
+        this.driverController = new CommandPS4Controller(constants.getInt("driverControllerPort"));
+        this.operatorController = new CommandPS4Controller(constants.getInt("operatorControllerPort"));
+        
+        this.pneumatics = new PneumaticsControlModule(constants.getInt("PCMPort"));
+        this.drivetrainSubsystem = new DrivetrainSubsystem(constants);
+
+        this.autonomousChooser = new SendableChooser<>();
+        this.autonomousChooser.setDefaultOption("Middle", new MiddleAutonomousCommand());
+        this.autonomousChooser.addOption("Left", new LeftAutonomousCommand());
+        //SmartDashboard.putData(autonomousChooser);
+        
+        // Separate functions for button bindings & default commands
+        this.configureButtonBindings();
+        this.configureDefaultCommands();
     }
 
-    else if(m_driverController.square().getAsBoolean()){
-    //else if Square is pressed, set gear to low
-    m_dt.setGearbox(1);
+    private void configureButtonBindings() {
+        this.operatorController.cross().debounce(0.1).whileTrue(new ShootCommand(
+            () -> operatorController.getR2Axis(),
+            (speed) -> shooterSubsystem.setShooterSpeed(speed),
+            [shooterSubsystem]
+        ));
     }
 
-    //Drive the robot using the controller in tank drive.
-    m_dt.tankDrive(m_driverController.getLeftY(), m_driverController.getRightY());
-  }
+    public void configureDefaultCommands() {
+        this.drivetrainSubsystem.setDefaultCommand(new TeleopDriveCommand(
+            () -> driverController.getLeftY(),
+            () -> driverController.getRightY(),
+            (left, right) -> drivetrainSubsystem.tankDrive(left, right),
+            [drivetrainSubsystem]
+        ));
+    }
+
+    public Command getAutonomousCommand() {
+        return this.autonomousChooser.getSelected();
+    }
 }
